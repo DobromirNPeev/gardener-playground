@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gardener Playground — интерактивен прототип</title>
+<style>
+  :root {
+    --bg: #0c1611;
+    --bg-soft: #10201a;
+    --panel: #163026;
+    --panel-2: #1c3b2e;
+    --line: #2a4a3b;
+    --text: #e6f6ee;
+    --muted: #9ac8b4;
+    --accent: #3ecf8e;      /* Gardener green */
+    --accent-2: #5ad1a8;    /* soft teal-green */
+    --warn: #f1b24a;
+    --danger: #f06d6d;
+    --garden: #009f76;      /* Gardener logo green */
+    --seed: #3f7a5e;
+    --shoot: #5ab98a;
+    --radius: 14px;
+    --shadow: 0 8px 28px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 700px at 70% -10%, #142b20 0%, var(--bg) 55%);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(15,23,36,.7);
+    backdrop-filter: blur(6px);
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .logo {
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+  }
+  header .logo svg { width: 34px; height: 34px; display: block; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .pulse-indicator {
+    margin-left: auto; font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .heartbeat {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(90,209,168,.7);
+    animation: hb 2.4s infinite;
+  }
+  @keyframes hb {
+    0% { box-shadow: 0 0 0 0 rgba(90,209,168,.6); }
+    70% { box-shadow: 0 0 0 10px rgba(90,209,168,0); }
+    100% { box-shadow: 0 0 0 0 rgba(90,209,168,0); }
+  }
+
+  main { display: flex; flex: 1; min-height: 0; }
+
+  /* left control rail */
+  .rail {
+    width: 320px; min-width: 320px;
+    border-right: 1px solid var(--line);
+    padding: 18px; overflow-y: auto;
+    background: var(--bg-soft);
+  }
+  .rail h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 18px 0 10px; }
+  .rail h2:first-child { margin-top: 0; }
+  .field { margin-bottom: 10px; }
+  .field label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  select, button {
+    font: inherit; color: var(--text);
+  }
+  select {
+    width: 100%; padding: 9px 10px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  .btn {
+    width: 100%; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line);
+    background: var(--panel); cursor: pointer; margin-bottom: 8px;
+    transition: transform .08s ease, background .15s ease, border-color .15s ease;
+    text-align: left; display: flex; align-items: center; gap: 9px;
+  }
+  .btn:hover { background: var(--panel-2); border-color: #3b5078; }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.primary { background: linear-gradient(135deg, rgba(62,207,142,.22), rgba(0,159,118,.22)); border-color: #2e6b52; }
+  .btn.primary:hover { background: linear-gradient(135deg, rgba(62,207,142,.33), rgba(0,159,118,.33)); }
+  .btn .ic { font-size: 15px; }
+  .btn.danger { border-color: #5e3030; }
+  .btn.danger:hover { background: #2a1d26; }
+
+  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin: 4px 0 12px; }
+
+  /* diagram */
+  .stage { flex: 1; position: relative; overflow: hidden; }
+  svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .canvas {
+    position: absolute; inset: 0; padding: 26px; z-index: 2;
+    display: grid;
+    grid-template-columns: 0.9fr 1fr 0.9fr;
+    grid-template-rows: 1fr;
+    gap: 26px;
+  }
+
+  .box {
+    border-radius: var(--radius);
+    border: 1px solid rgba(255,255,255,.07);
+    background: rgba(255,255,255,.015);
+    padding: 18px 18px 16px; position: relative;
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .box .title { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  .box .tag { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; }
+
+  .garden { grid-column: 1; align-self: start; max-height: 100%; border-color: rgba(58,111,143,.4); min-height: 0; overflow-y: auto; }
+  .garden .dot { background: var(--garden); }
+  .seed .dot { background: var(--seed); }
+
+  /* small component chips that live inside a seed / shoot */
+  .comp {
+    border: 1px solid rgba(255,255,255,.07); border-radius: 9px; padding: 7px 9px;
+    background: rgba(255,255,255,.03); display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px;
+  }
+  .comp .ci { font-size: 13px; }
+  .comp .cn { font-weight: 600; }
+  .comp .cd { color: var(--muted); font-size: 10.5px; }
+  .comp.dim { opacity: .5; }
+  .comp.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(62,207,142,.4), 0 0 14px rgba(62,207,142,.3); }
+
+  .actors { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+  .actor {
+    border: 1px solid rgba(255,255,255,.06); border-radius: 11px; padding: 10px 12px;
+    background: rgba(255,255,255,.025); cursor: pointer; position: relative;
+    transition: border-color .15s, background .15s, box-shadow .2s;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .actor:hover { border-color: var(--accent-2); background: #1f4234; }
+  .actor .ai { font-size: 17px; }
+  .actor .an { font-size: 13px; font-weight: 600; }
+  .actor .ad { font-size: 11px; color: var(--muted); }
+  .actor.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(90,209,168,.35), 0 0 18px rgba(90,209,168,.25); }
+
+  .seeds { grid-column: 2; display: flex; flex-direction: column; gap: 22px; overflow-y: auto; min-height: 0; }
+  .seed { cursor: pointer; flex: 0 0 auto; }
+  .seed.disabled { opacity: .45; filter: grayscale(.6); }
+  .seed .region { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .seed .count {
+    font-size: 10.5px; color: var(--accent); margin-left: 8px;
+    border: 1px solid rgba(90,209,168,.3); background: rgba(90,209,168,.08);
+    border-radius: 20px; padding: 1px 8px;
+  }
+  /* static seed infrastructure (gardenlet always present) */
+  .seed-infra { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; margin-bottom: 4px; }
+  .seed-body {
+    margin-top: 10px; border: 1px dashed rgba(255,255,255,.1); border-radius: 12px;
+    padding: 10px; display: flex; flex-direction: column; gap: 10px; align-content: flex-start;
+    min-height: 50px; position: relative;
+  }
+  .seed-body .empty { color: var(--muted); font-size: 11.5px; font-style: italic; margin: auto; }
+
+  /* SHOOT column (third column) — what runs on the shoot's own worker nodes */
+  .shoots { grid-column: 3; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
+  .shoots .colhint { font-size: 11px; color: var(--muted); margin-bottom: 2px; line-height: 1.4; }
+  .shootbox {
+    border: 1px solid rgba(106,138,214,.4); border-radius: var(--radius);
+    background: rgba(106,138,214,.06); padding: 13px; cursor: pointer; position: relative;
+    animation: dropin .45s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .shootbox.selected { box-shadow: 0 0 0 2px var(--accent-2); }
+  .shootbox.pending { border-style: dashed; opacity: .8; }
+  .shootbox .shtitle { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+  .shootbox .shmeta { font-size: 10.5px; color: var(--muted); margin: 3px 0 9px; }
+  .shootbox .worker-comps { display: flex; flex-direction: column; gap: 6px; }
+  /* worker nodes inside a shoot */
+  .wnodes { display: flex; gap: 8px; margin-top: 2px; }
+  .wnode {
+    flex: 1; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 8px;
+    background: rgba(255,255,255,.02);
+  }
+  .wnode .wntitle { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; display:flex; align-items:center; gap:5px; }
+  .wnode .comp { padding: 5px 7px; font-size: 10.5px; }
+  .cluster-wide {
+    margin-top: 9px; border: 1px dashed rgba(90,209,168,.3); border-radius: 10px;
+    padding: 8px; background: rgba(90,209,168,.04);
+  }
+  .cluster-wide .cwlabel { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); margin-bottom: 6px; }
+  .shootbox .seedref { font-size: 10px; color: var(--muted); margin-top: 9px; font-style: italic; }
+
+  /* a shoot control plane living inside a seed */
+  .cp {
+    border-radius: 11px; padding: 10px 12px; width: 100%;
+    background: rgba(106,138,214,.1);
+    border: 1px solid rgba(106,138,214,.4); cursor: pointer; position: relative;
+    animation: dropin .5s cubic-bezier(.2,.9,.3,1.2);
+  }
+  @keyframes dropin {
+    from { transform: translateY(-14px) scale(.9); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+  }
+  .cp .cplabel { font-size: 9.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 3px; }
+  .cp .cpname { font-size: 12.5px; font-weight: 650; display: flex; align-items: center; gap: 6px; }
+  .cp .cpphase { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .cp.selected { box-shadow: 0 0 0 2px var(--accent-2); }
+  .cp .pods { display: flex; gap: 4px; margin-top: 9px; align-items: center; }
+  .cp .pods-label { font-size: 10px; color: var(--muted); margin-left: 4px; }
+  .pod {
+    width: 15px; height: 15px; border-radius: 4px; background: #2a3a5e;
+    border: 1px solid #3f5a8c;
+    animation: podup .4s ease both;
+  }
+  .pod.up { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  @keyframes podup { from { transform: scale(0); } to { transform: scale(1); } }
+
+  .cp.hibernated { opacity: .7; filter: saturate(.4); }
+  .cp.reconciling { animation: recon 1.2s ease; }
+  @keyframes recon {
+    0%,100% { box-shadow: none; }
+    50% { box-shadow: 0 0 0 3px rgba(90,209,168,.5), 0 0 22px rgba(90,209,168,.4); }
+  }
+
+  .badge { font-size: 9.5px; padding: 1px 6px; border-radius: 20px; border: 1px solid var(--line); }
+  .badge.Pending { color: var(--warn); border-color: #5a4a28; background: #2a2316; }
+  .badge.Running { color: var(--accent); border-color: #2d5347; background: #14281f; }
+  .badge.Hibernated { color: var(--accent-2); border-color: #30456e; background: #16233c; }
+  .badge.Blocked, .badge.Failed { color: var(--danger); border-color: #5e3030; background: #2a1618; }
+  .badge.Degraded { color: var(--warn); border-color: #5a4a28; background: #2a2316; }
+  .badge.Scheduling { color: var(--accent-2); }
+  .comp.checking { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(90,209,168,.3); transition: box-shadow .15s, border-color .15s; }
+
+  /* floating "pending shoots" tray inside garden */
+  .pending-tray { margin-top: auto; }
+  .pending-tray h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin: 14px 0 6px; }
+  .ptag {
+    font-size: 11px; padding: 6px 8px; border-radius: 8px; background: #2a2316;
+    border: 1px solid #5a4a28; color: var(--warn); margin-bottom: 5px; cursor: pointer;
+  }
+
+  /* right side panel */
+  .side {
+    width: 340px; min-width: 340px; border-left: 1px solid var(--line);
+    background: var(--bg-soft); padding: 18px; overflow-y: auto;
+  }
+  .side h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 9px; }
+  .side .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--accent); margin-bottom: 12px; }
+  .side p { font-size: 13.5px; line-height: 1.6; color: var(--text); }
+  .side .talks { margin-top: 14px; }
+  .side .talks h4 { font-size: 12px; color: var(--muted); text-transform: uppercase; margin: 0 0 7px; }
+  .side .talks li { font-size: 12.5px; color: var(--muted); margin-bottom: 5px; line-height: 1.4; }
+  .side .placeholder { color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+  /* log */
+  .log { margin-top: 10px; }
+  .log h2 { margin-bottom: 6px; }
+  .logbox {
+    background: #0c131f; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; height: 150px; overflow-y: auto; line-height: 1.55;
+  }
+  .logline { margin-bottom: 3px; color: var(--muted); }
+  .logline b { color: var(--text); }
+  .logline.ok b { color: var(--accent); }
+  .logline.warn b { color: var(--warn); }
+  .logline.err b { color: var(--danger); }
+
+  .wire { stroke: transparent; stroke-width: 1.5; fill: none; transition: stroke .3s; }
+  .wire.shoot-wire { stroke: rgba(106,138,214,.45); stroke-width: 1.8; stroke-dasharray: 2 4; }
+  .wire.live { stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 6 8; animation: flow .8s linear infinite; filter: drop-shadow(0 0 4px rgba(90,209,168,.6)); }
+  @keyframes flow { to { stroke-dashoffset: -28; } }
+
+  .legend { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.7; }
+  .legend span.sw { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:middle; }
+  kbd { background:#0c131f; border:1px solid var(--line); border-radius:5px; padding:1px 5px; font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><svg viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><defs><path d="M41.8864954,0.994901575 C42.8830405,0.514990742 44.5028956,0.516982644 45.4953045,0.994901575 L76.8159138,16.0781121 C77.8124589,16.5580229 78.8208647,17.8257185 79.0659694,18.8995926 L86.8015211,52.7912589 C87.0476474,53.8696088 86.6852538,55.4484075 85.9984855,56.3095876 L64.3239514,83.4885938 C63.6343208,84.3533632 62.1740175,85.0543973 61.0725268,85.0543973 L26.3092731,85.0543973 C25.2031915,85.0543973 23.7446167,84.3497739 23.0578485,83.4885938 L1.38331434,56.3095876 C0.693683723,55.4448182 0.335174016,53.865133 0.580278769,52.7912589 L8.31583044,18.8995926 C8.56195675,17.8212428 9.57347722,16.556031 10.5658861,16.0781121 L41.8864954,0.994901575 Z" id="lp1"></path><linearGradient x1="12.7542673%" y1="-18.6617048%" x2="88.2666158%" y2="84.6075483%" id="lg3"><stop stop-color="#FFFFFF" offset="0%"></stop><stop stop-color="#439246" offset="100%"></stop></linearGradient><linearGradient x1="50%" y1="4.93673768%" x2="148.756007%" y2="175.514523%" id="lg4"><stop stop-color="#FFFFFF" offset="0%"></stop><stop stop-color="#439246" offset="100%"></stop></linearGradient><linearGradient x1="19.1574381%" y1="-9.04800713%" x2="82.2203149%" y2="77.9084293%" id="lg5"><stop stop-color="#FFFFFF" offset="0%"></stop><stop stop-color="#439246" offset="100%"></stop></linearGradient><linearGradient x1="57.4403751%" y1="26.3148481%" x2="137.966711%" y2="158.080556%" id="lg6"><stop stop-color="#FFFFFF" offset="0%"></stop><stop stop-color="#439246" offset="100%"></stop></linearGradient></defs><g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"><g><g transform="translate(1.000000, 0.000000)"><mask id="lm2" fill="white"><use xlink:href="#lp1"></use></mask><use fill="#009F76" xlink:href="#lp1"></use><polygon fill="#000000" opacity="0.289628623" mask="url(#lm2)" points="-17.6484375 54.5224609 30.8242188 25.0791016 63.4726562 58.5 24.7324219 92.6689453"></polygon></g><path d="M56.8508631,39.260019 C56.4193519,40.443987 55.6088085,41.581593 54.6736295,42.1938694 L46.5997298,47.4799783 C45.2142627,48.3870654 42.9749783,48.3916494 41.5825097,47.4799783 L33.50861,42.1938694 C32.123143,41.2867823 31,39.206345 31,37.545932 L31,26.4150304 C31,25.6897174 31.2131118,24.884885 31.5692681,24.1324532 L56.8508631,39.260019 Z" fill="url(#lg3)" transform="translate(43.925432, 36.147233) scale(-1, 1) translate(-43.925432, -36.147233) "></path><path d="M56.0774672,25.1412464 C56.4306829,25.8903325 56.6425556,26.6907345 56.6425556,27.4119019 L56.6425556,38.5428034 C56.6425556,40.2027013 55.5264141,42.2790698 54.1339456,43.1907408 L46.0600459,48.4768498 C44.6745788,49.3839368 42.4352943,49.3885208 41.0428258,48.4768498 L32.9689261,43.1907408 C32.2918101,42.7474223 31.6773514,42.0238435 31.2260376,41.206007 L56.0774672,25.1412464 Z" fill="url(#lg4)" transform="translate(43.821278, 37.246598) scale(-1, 1) translate(-43.821278, -37.246598) "></path><path d="M65.0702134,57.1846889 C64.5985426,58.2007851 63.8367404,59.1236871 62.9788591,59.6189851 L47.37497,68.6278947 C45.9443535,69.4538615 43.6226022,69.4525546 42.1942494,68.6278947 L26.5903603,59.6189851 C25.1597438,58.7930183 24,56.7816693 24,55.1323495 L24,37.1145303 C24,36.3487436 24.249712,35.5060005 24.6599102,34.7400631 L65.0702134,57.1846889 Z" fill="url(#lg5)"></path><path d="M65.0189476,34.954538 C65.3636909,35.6617313 65.5692194,36.42021 65.5692194,37.1145303 L65.5692194,55.1323495 C65.5692194,56.7842831 64.4072119,58.7943252 62.9788591,59.6189851 L47.37497,68.6278947 C45.9443535,69.4538615 43.6226022,69.4525546 42.1942494,68.6278947 L26.5903603,59.6189851 C25.9237304,59.2341061 25.3159155,58.5918431 24.8568495,57.8487596 L65.0189476,34.954538 Z" fill="url(#lg6)"></path></g></g></svg></div>
+  <div>
+    <h1>Gardener Playground</h1>
+    <div class="sub">Интерактивен прототип — как Gardener управлява Kubernetes клъстери</div>
+  </div>
+  <div class="pulse-indicator"><span class="heartbeat"></span> контролерите реконсилират непрекъснато</div>
+</header>
+
+<main>
+  <!-- LEFT CONTROL RAIL -->
+  <aside class="rail">
+    <h2>Създай Shoot</h2>
+    <div class="hint">Shoot е клъстер на краен потребител. Контролният му панел работи като pods ВЪТРЕ един Seed.</div>
+    <div class="field">
+      <label>Облачен доставчик</label>
+      <select id="selProvider">
+        <option value="aws">aws</option>
+        <option value="gcp">gcp</option>
+        <option value="azure">azure</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Регион</label>
+      <select id="selRegion">
+        <option value="eu-west-1">eu-west-1</option>
+        <option value="europe-west3">europe-west3</option>
+        <option value="us-east-1">us-east-1</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Тип машина (worker)</label>
+      <select id="selMachine">
+        <option value="m5.large">m5.large</option>
+        <option value="n2-standard-4">n2-standard-4</option>
+        <option value="invalid.type">invalid.type (невалиден)</option>
+      </select>
+    </div>
+    <button class="btn primary" id="btnCreate"><span class="ic">➕</span> Създай Shoot</button>
+
+    <h2>Избран Shoot</h2>
+    <div class="hint" id="selInfo">Кликни върху контролен панел в диаграмата, за да го избереш.</div>
+    <button class="btn" id="btnHibernate" disabled><span class="ic">🌙</span> Приспи (Hibernate)</button>
+    <button class="btn" id="btnWake" disabled><span class="ic">☀️</span> Събуди (Wake up)</button>
+    <button class="btn" id="btnReconcile" disabled><span class="ic">🔄</span> Задействай Reconcile</button>
+    <button class="btn danger" id="btnDelete" disabled><span class="ic">🗑️</span> Изтрий Shoot</button>
+
+    <h2>Внасяне на повреди</h2>
+    <div class="hint">Виж как системата реагира, когато нещо се счупи.</div>
+    <button class="btn danger" id="btnToggleSeedA"><span class="ic">⛔</span> Изключи Seed A</button>
+    <button class="btn danger" id="btnToggleSeedB"><span class="ic">⛔</span> Изключи Seed B</button>
+    <button class="btn danger" id="btnToggleExt"><span class="ic">🧩</span> Премахни extension „aws“</button>
+
+    <h2>Легенда</h2>
+    <div class="legend">
+      <div><span class="sw" style="background:var(--garden)"></span>Garden — мозъкът</div>
+      <div><span class="sw" style="background:var(--seed)"></span>Seed — хоства контролни панели</div>
+      <div><span class="sw" style="background:var(--shoot)"></span>Shoot control plane (pods)</div>
+      <div style="margin-top:6px">Светещите стрелки = активен reconcile</div>
+    </div>
+  </aside>
+
+  <!-- CENTER STAGE -->
+  <section class="stage">
+    <svg class="wires" id="wires"></svg>
+    <div class="canvas" id="canvas">
+      <!-- GARDEN -->
+      <div class="box garden" id="box-garden" data-explain="garden">
+        <div class="title"><span class="dot"></span> Garden <span class="badge" style="margin-left:auto">централен клъстер</span></div>
+        <div class="tag">Съхранява желаното състояние и управлява всичко</div>
+        <div class="actors">
+          <div class="actor" id="actor-apiserver" data-explain="apiserver">
+            <span class="ai">🗄️</span><div><div class="an">API Server</div><div class="ad">входът към Shoot/Seed обектите</div></div>
+          </div>
+          <div class="actor" id="actor-etcd" data-explain="garden-etcd">
+            <span class="ai">🗃️</span><div><div class="an">etcd</div><div class="ad">базата зад API Server-а (main + events)</div></div>
+          </div>
+          <div class="actor" id="actor-scheduler" data-explain="scheduler">
+            <span class="ai">🧭</span><div><div class="an">Scheduler</div><div class="ad">избира подходящ Seed за всеки Shoot</div></div>
+          </div>
+          <div class="actor" id="actor-cm" data-explain="cm">
+            <span class="ai">🛠️</span><div><div class="an">Controller Manager</div><div class="ad">жизнен цикъл и поддръжка</div></div>
+          </div>
+          <div class="actor" id="actor-ext" data-explain="ext">
+            <span class="ai">🧩</span><div><div class="an">Extensions</div><div class="ad">доставчици: cloud / OS / мрежа</div></div>
+          </div>
+        </div>
+        <div class="pending-tray" id="pendingTray" style="display:none">
+          <h4>Чакащи (Pending) Shoots</h4>
+          <div id="pendingList"></div>
+        </div>
+      </div>
+
+      <!-- SEEDS -->
+      <div class="seeds">
+        <div class="box seed" id="box-seedA" data-explain="seedA">
+          <div class="title"><span class="dot"></span> Seed A <span class="region">aws / eu-west-1</span><span class="count" id="seedA-count">0 панела</span></div>
+          <div class="tag">Хоства контролните панели на shoots (като pods)</div>
+          <div class="seed-infra">
+            <div class="comp" id="gardenlet-A" data-explain="gardenlet"><span class="ci">🤖</span><div><span class="cn">gardenlet</span> <span class="cd">— агентът, реконсилира тук</span></div></div>
+          </div>
+          <div class="seed-body" id="seedA-body"><div class="empty">няма контролни панели тук</div></div>
+        </div>
+        <div class="box seed" id="box-seedB" data-explain="seedB">
+          <div class="title"><span class="dot"></span> Seed B <span class="region">gcp / europe-west3</span><span class="count" id="seedB-count">0 панела</span></div>
+          <div class="tag">Хоства контролните панели на shoots (като pods)</div>
+          <div class="seed-infra">
+            <div class="comp" id="gardenlet-B" data-explain="gardenlet"><span class="ci">🤖</span><div><span class="cn">gardenlet</span> <span class="cd">— агентът, реконсилира тук</span></div></div>
+          </div>
+          <div class="seed-body" id="seedB-body"><div class="empty">няма контролни панели тук</div></div>
+        </div>
+      </div>
+
+      <!-- SHOOTS (third column — the shoot clusters' own worker-node side) -->
+      <div class="shoots" id="shootsCol">
+        <div class="colhint">🌱 <b>Shoot клъстери</b> — това са самите клъстери на потребителя. Тук виждаш какво върви на <b>worker nodes</b>. Контролният им панел обаче живее в Seed-а вляво (стрелката го показва).</div>
+        <div class="empty" id="shootsEmpty" style="color:var(--muted);font-size:11.5px;font-style:italic;padding:8px">Още няма shoots. Натисни „Създай Shoot“.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT SIDE PANEL -->
+  <aside class="side">
+    <div id="explainPanel">
+      <div class="placeholder">
+        <strong>👋 Добре дошъл!</strong><br><br>
+        Това е интерактивен модел на Gardener. Кликни върху който и да е елемент
+        (актьор в Garden, Seed, или контролен панел), за да видиш какво прави и с кого говори.
+        <br><br>
+        Започни като натиснеш <b>„Създай Shoot“</b> вляво и гледай как Scheduler-ът
+        избира Seed и контролният панел „каца“ вътре в него.
+      </div>
+    </div>
+    <div class="log">
+      <h2>Журнал на събитията</h2>
+      <div class="logbox" id="logbox"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+/* ============================================================
+   Gardener Playground — in-memory simulation (vanilla JS)
+   No backend, no Kubernetes. "Controllers" are setTimeout funcs.
+   ============================================================ */
+
+// ---- Explanations (Bulgarian, friendly for newcomers) ----
+const EXPLAIN = {
+  garden: { icon:"🏛️", kind:"Централен клъстер", name:"Garden",
+    text:"Garden е „мозъкът“ на Gardener — централният клъстер, в който живее Gardener API сървърът и контролните компоненти. Тук се пази ЖЕЛАНОТО състояние: какви Shoot и Seed обекти искаме да съществуват.",
+    talks:["API Server, Scheduler, Controller Manager — всички работят тук","Разговаря с всеки Seed чрез неговия gardenlet"] },
+  apiserver: { icon:"🗄️", kind:"Актьор", name:"API Server",
+    text:"gardener-apiserver е входната точка и „единствената истина“ за достъп: през него се четат и пишат Shoot и Seed обектите. Самите данни обаче не се пазят в него, а в etcd зад него. Всеки друг компонент чете желаното състояние през API Server-а и записва обратно актуалния статус.",
+    talks:["Пази данните в etcd (зад него)","Чете/пише Scheduler-ът (назначава Seed)","Чете/пише gardenlet в seed-а (докладва статус)","Чете Controller Manager"] },
+  "garden-etcd": { icon:"🗃️", kind:"База на Garden control plane-а", name:"etcd",
+    text:"etcd е базата данни зад gardener-apiserver — тук реално се пазят Shoot/Seed обектите. Garden-ът има собствено etcd (всъщност две: main + events), също както всеки shoot control plane. Управлява се от etcd-druid.",
+    talks:["Чете/пише само gardener-apiserver"] },
+  scheduler: { icon:"🧭", kind:"Актьор", name:"Scheduler",
+    text:"Scheduler-ът гледа за Shoots в състояние Pending и им избира подходящ Seed. Съпоставя региона и доставчика на Shoot с тези на наличните Seeds. Ако никой Seed не пасва, Shoot остава Pending с видима причина.",
+    talks:["Чете Pending shoots от API Server","Записва избрания Seed обратно в Shoot обекта"] },
+  cm: { icon:"🛠️", kind:"Актьор", name:"Controller Manager",
+    text:"Controller Manager се грижи за по-високо ниво на жизнения цикъл и поддръжката — следи състояния, проверява условия (conditions) и поддържа реда. Не деплойва сам pods; координира.",
+    talks:["Наблюдава обектите през API Server","Сътрудничи на gardenlet и Scheduler"] },
+  gardenlet: { icon:"🤖", kind:"Актьор (работникът)", name:"gardenlet",
+    text:"gardenlet работи ВЪТРЕ във всеки Seed. Той е истинският работник: взема желаното състояние и РЕКОНСИЛИРА контролния панел на shoot-а в своя Seed — тоест реално деплойва pods-овете. При reconcile драйва актуалното състояние към желаното.",
+    talks:["Чете желаното състояние от API Server в Garden","Деплойва контролни панели (pods) в своя Seed","Докладва статус обратно на API Server"] },
+  ext: { icon:"🧩", kind:"Актьор", name:"Extensions",
+    text:"Extensions са приставки за конкретни доставчици (cloud / операционна система / мрежа). За да бъде създаден Shoot, трябва да има налична подходяща extension за неговия доставчик. Ако липсва — Shoot не може да продължи.",
+    talks:["Използват се от gardenlet по време на reconcile","Трябва да пасват на доставчика на Shoot (aws/gcp/…)"] },
+  seedA: { icon:"🌿", kind:"Seed клъстер", name:"Seed A",
+    text:"Seed е клъстер, който ХОСТВА контролните панели на shoots. Този Seed е профилиран за aws / eu-west-1. Shoot с този доставчик и регион може да бъде назначен тук. Вътре в него gardenlet деплойва контролните панели като pods.",
+    talks:["Приема shoots, които пасват на профила му","Неговият gardenlet говори с Garden API Server"] },
+  seedB: { icon:"🌿", kind:"Seed клъстер", name:"Seed B",
+    text:"Seed B е профилиран за gcp / europe-west3. Само shoots с този доставчик и регион могат да бъдат назначени тук. Ако го изключиш, shoots, които разчитат на него, не могат да бъдат обслужени.",
+    talks:["Приема само gcp/europe-west3 shoots","Неговият gardenlet говори с Garden API Server"] },
+  // shoot control-plane components (live as pods INSIDE the seed)
+  "cp-kube-apiserver": { icon:"🗄️", kind:"Control plane на Shoot (в Seed)", name:"kube-apiserver",
+    text:"API сървърът на самия shoot клъстер. Работи като pod ВЪТРЕ в Seed-а, не на worker-ите. Worker nodes и kubelet-ите му говорят през него.",
+    talks:["Пази състоянието на shoot клъстера в etcd","kubelet/kube-proxy на shoot-а го ползват"] },
+  "cp-etcd": { icon:"🗃️", kind:"Control plane на Shoot (в Seed)", name:"etcd",
+    text:"Базата данни на shoot control plane-а. Пази цялото състояние на shoot клъстера. Работи като pod в Seed-а.",
+    talks:["Чете/пише само kube-apiserver на shoot-а"] },
+  "cp-kcm": { icon:"🛠️", kind:"Control plane на Shoot (в Seed)", name:"kube-controller-manager",
+    text:"Контролерите на shoot клъстера (deployments, nodes, endpoints…). Работи като pod в Seed-а.",
+    talks:["Говори с kube-apiserver на shoot-а"] },
+  "cp-ksched": { icon:"🧭", kind:"Control plane на Shoot (в Seed)", name:"kube-scheduler",
+    text:"Планировчикът на shoot клъстера — разпределя pods по worker nodes на shoot-а. Работи като pod в Seed-а.",
+    talks:["Говори с kube-apiserver на shoot-а"] },
+  "cp-mcm": { icon:"⚙️", kind:"Control plane на Shoot (в Seed)", name:"machine-controller-manager",
+    text:"Създава и управлява worker МАШИНИТЕ на shoot-а при доставчика. Работи в Seed-а; резултатът са реалните worker nodes от дясната колона.",
+    talks:["Чете machine CRDs","Създава VM-и при cloud доставчика"] },
+  // shoot worker-node components (run on the shoot's own nodes — right column)
+  "w-kubelet": { icon:"🧱", kind:"На всеки worker node (Shoot)", name:"kubelet",
+    text:"Агентът на ВСЕКИ worker node. По един на всеки node — стартира pods на този node и докладва на kube-apiserver на shoot-а (който е в Seed-а). Bootstrap-ва се от gardener-node-agent.",
+    talks:["Говори с kube-apiserver на shoot-а (в Seed-а)"] },
+  "w-kproxy": { icon:"🔀", kind:"На всеки worker node (DaemonSet)", name:"kube-proxy",
+    text:"Мрежовият компонент — работи като DaemonSet, тоест по един pod на ВСЕКИ worker node. Насочва трафика към services на този node.",
+    talks:["Чете service/endpoint правила от shoot API сървъра"] },
+  "w-coredns": { icon:"📇", kind:"В целия shoot клъстер (не per-node)", name:"CoreDNS",
+    text:"DNS за ЦЕЛИЯ shoot клъстер — работи като Deployment с няколко реплики в kube-system, НЕ по един на всеки node. Резолвва имена на services и pods за всички nodes.",
+    talks:["Пита shoot kube-apiserver за services","Ползва се от pods на всички worker nodes"] },
+};
+
+// what lives in a shoot control plane (inside the seed) and on its workers
+const CP_COMPONENTS = [
+  { key:"cp-kube-apiserver", icon:"🗄️", name:"kube-apiserver" },
+  { key:"cp-etcd",  icon:"🗃️", name:"etcd" },
+  { key:"cp-kcm",   icon:"🛠️", name:"kube-controller-manager" },
+  { key:"cp-ksched",icon:"🧭", name:"kube-scheduler" },
+  { key:"cp-mcm",   icon:"⚙️", name:"machine-controller-manager" },
+];
+// what runs on EACH worker node (per-node) vs cluster-wide in the shoot
+const NODE_COMPONENTS = [
+  { key:"w-kubelet", icon:"🧱", name:"kubelet" },
+  { key:"w-kproxy",  icon:"🔀", name:"kube-proxy" },
+];
+const CLUSTER_COMPONENTS = [
+  { key:"w-coredns", icon:"📇", name:"CoreDNS" },
+];
+const WORKER_NODE_COUNT = 2;
+
+// ---- World state ----
+const seeds = {
+  A: { id:"A", label:"Seed A", provider:"aws", region:"eu-west-1", enabled:true, bodyEl:null },
+  B: { id:"B", label:"Seed B", provider:"gcp", region:"europe-west3", enabled:true, bodyEl:null },
+};
+seeds.A.bodyEl = document.getElementById("seedA-body");
+seeds.B.bodyEl = document.getElementById("seedB-body");
+
+const extensions = { aws:true, gcp:true, azure:true }; // availability
+const VALID_MACHINES = new Set(["m5.large","n2-standard-4"]);
+
+let shoots = [];       // array of shoot objects
+let shootSeq = 0;
+let selectedShootId = null;
+
+// ---- DOM helpers ----
+const $ = id => document.getElementById(id);
+const logbox = $("logbox");
+function log(msg, cls="") {
+  const d = document.createElement("div");
+  d.className = "logline " + cls;
+  const t = new Date().toLocaleTimeString("bg-BG");
+  d.innerHTML = `<span style="opacity:.5">${t}</span> <b>${msg}</b>`;
+  logbox.prepend(d);
+  while (logbox.children.length > 60) logbox.lastChild.remove();
+}
+
+// ---- Wires between actors and seeds (SVG) ----
+const wiresSvg = $("wires");
+function centerOf(el) {
+  const s = $("canvas").getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return { x: r.left - s.left + r.width/2, y: r.top - s.top + r.height/2 };
+}
+const WIRE_DEFS = [
+  { id:"w-sched-A", from:"actor-scheduler", to:"box-seedA" },
+  { id:"w-sched-B", from:"actor-scheduler", to:"box-seedB" },
+  // gardenlet lives inside the seed; API Server <-> gardenlet shows as apiserver -> seed
+  { id:"w-glet-A",  from:"actor-apiserver", to:"gardenlet-A" },
+  { id:"w-glet-B",  from:"actor-apiserver", to:"gardenlet-B" },
+  { id:"w-api-sched", from:"actor-apiserver", to:"actor-scheduler" },
+];
+function edgePath(a, b) {
+  // connect from right edge of a to left edge of b (horizontal flow)
+  const s = $("canvas").getBoundingClientRect();
+  const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+  const p1 = { x: ra.right - s.left, y: ra.top - s.top + ra.height/2 };
+  const p2 = { x: rb.left - s.left,  y: rb.top - s.top + rb.height/2 };
+  const dx = Math.max(40, (p2.x - p1.x) * 0.5);
+  return `M ${p1.x} ${p1.y} C ${p1.x+dx} ${p1.y}, ${p2.x-dx} ${p2.y}, ${p2.x} ${p2.y}`;
+}
+function drawWires() {
+  wiresSvg.innerHTML = "";
+  // garden actors -> seeds (left column to middle column)
+  for (const w of WIRE_DEFS) {
+    const a = $(w.from), b = $(w.to);
+    if (!a || !b) continue;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", edgePath(a, b));
+    path.setAttribute("class","wire");
+    path.setAttribute("id", w.id);
+    wiresSvg.appendChild(path);
+  }
+  // each scheduled shoot box (right column) -> its hosting seed (middle)
+  for (const sh of shoots) {
+    if (!sh.seed) continue;
+    const box = $("shoot-"+sh.id), seedBox = $("box-seed"+sh.seed);
+    if (!box || !seedBox) continue;
+    // draw from seed (right edge) to shoot box (left edge): seed hosts shoot's CP
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", edgePath(seedBox, box));
+    path.setAttribute("class","wire shoot-wire");
+    path.setAttribute("id", "w-shoot-"+sh.id);
+    wiresSvg.appendChild(path);
+  }
+}
+function liveWire(id, ms=1200) {
+  const el = $(id); if (!el) return;
+  el.classList.add("live");
+  setTimeout(() => el.classList.remove("live"), ms);
+}
+function flashActor(id, ms=1200) {
+  const el = $(id); if (!el) return;
+  el.classList.add("active");
+  setTimeout(() => el.classList.remove("active"), ms);
+}
+// gardenlet now lives in the seed; flash its chip in the given seed
+function flashGardenlet(k, ms=1200) { flashActor("gardenlet-"+k, ms); }
+
+window.addEventListener("resize", drawWires);
+
+// ---- Rendering ----
+function render() {
+  // seeds enabled/disabled styling
+  for (const k of ["A","B"]) {
+    const box = $("box-seed"+k);
+    box.classList.toggle("disabled", !seeds[k].enabled);
+  }
+  // clear seed bodies
+  for (const k of ["A","B"]) {
+    seeds[k].bodyEl.innerHTML = "";
+  }
+  // pending tray
+  const pendingShoots = shoots.filter(s => s.phase==="Pending" || s.phase==="Blocked");
+  const tray = $("pendingTray"), plist = $("pendingList");
+  if (pendingShoots.length) {
+    tray.style.display = "block";
+    plist.innerHTML = "";
+    for (const s of pendingShoots) {
+      const el = document.createElement("div");
+      el.className = "ptag";
+      el.textContent = `${s.name} — ${s.reason || "чака планиране"}`;
+      el.onclick = () => selectShoot(s.id);
+      plist.appendChild(el);
+    }
+  } else {
+    tray.style.display = "none";
+  }
+  // control planes inside seeds
+  for (const k of ["A","B"]) {
+    const list = shoots.filter(s => s.seed === k && s.phase!=="Pending" && s.phase!=="Blocked");    const cnt = $("seed"+k+"-count");
+    if (cnt) cnt.textContent = list.length + (list.length===1 ? " панел" : " панела");
+    if (!list.length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "няма контролни панели тук";
+      seeds[k].bodyEl.appendChild(e);
+    } else {
+      for (const s of list) seeds[k].bodyEl.appendChild(renderCP(s));
+    }
+  }
+  renderShootsColumn();
+  drawWires();
+  updateControls();
+}
+
+// Third column: one box per shoot = the shoot cluster (its worker-node side)
+function renderShootsColumn() {
+  const col = $("shootsCol");
+  // remove previously-rendered shoot boxes (keep the hint + empty node)
+  col.querySelectorAll(".shootbox").forEach(n => n.remove());
+  const empty = $("shootsEmpty");
+  empty.style.display = shoots.length ? "none" : "block";
+  for (const s of shoots) col.appendChild(renderShootBox(s));
+}
+
+function renderShootBox(s) {
+  const el = document.createElement("div");
+  const pending = (s.phase==="Pending" || s.phase==="Blocked");
+  el.className = "shootbox" + (s.id===selectedShootId ? " selected":"") + (pending ? " pending":"");
+  el.id = "shoot-"+s.id;
+  const seedRef = s.seed
+    ? `🔗 control plane-ът ми живее в <b>Seed ${s.seed}</b>`
+    : (pending ? "⏳ още нямам хостващ Seed" : "");
+  let body;
+  if (s.phase==="Running") {
+    // one box per worker node, each with per-node components
+    const nodeComps = NODE_COMPONENTS.map(c =>
+      `<div class="comp" data-explain="${c.key}"><span class="ci">${c.icon}</span><span class="cn">${c.name}</span></div>`).join("");
+    let nodes = "";
+    for (let i=1;i<=WORKER_NODE_COUNT;i++) {
+      nodes += `<div class="wnode"><div class="wntitle">🖥️ worker node ${i}</div>${nodeComps}</div>`;
+    }
+    const clusterComps = CLUSTER_COMPONENTS.map(c =>
+      `<div class="comp" data-explain="${c.key}"><span class="ci">${c.icon}</span><span class="cn">${c.name}</span></div>`).join("");
+    body = `
+      <div class="wnodes">${nodes}</div>
+      <div class="cluster-wide"><div class="cwlabel">в целия клъстър (не per-node)</div>${clusterComps}</div>`;
+  } else {
+    body = `<div class="comp dim"><span class="cd">worker nodes още не са готови (${phaseLabel(s.phase)})</span></div>`;
+  }
+  el.innerHTML = `
+    <div class="shtitle">🌱 ${s.name} <span class="badge ${s.phase}" style="margin-left:auto">${phaseLabel(s.phase)}</span></div>
+    <div class="shmeta">${s.provider} / ${s.region} · ${s.machine}</div>
+    <div class="worker-comps">${body}</div>
+    <div class="seedref">${seedRef}</div>`;
+  el.onclick = (ev) => {
+    const c = ev.target.closest(".comp[data-explain]");
+    if (c) { ev.stopPropagation(); showExplain(c.dataset.explain); return; }
+    ev.stopPropagation(); selectShoot(s.id);
+  };
+  return el;
+}
+
+function renderCP(s) {
+  const el = document.createElement("div");
+  el.className = "cp" + (s.id===selectedShootId ? " selected":"")
+    + (s.phase==="Hibernated"?" hibernated":"");
+  el.id = "cp-"+s.id;
+  const running = s.phase==="Running";
+  const live = s.phase==="Running" || s.phase==="Degraded";
+  const scheduling = s.phase==="Scheduling";
+  const comps = CP_COMPONENTS.map(c => {
+    const dim = (!live && !scheduling) ? " dim" : "";
+    return `<div class="comp${dim}" data-explain="${c.key}"><span class="ci">${c.icon}</span><span class="cn">${c.name}</span></div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="cplabel">control plane на</div>
+    <div class="cpname">🧩 ${s.name} <span class="badge ${s.phase}" style="margin-left:auto">${phaseLabel(s.phase)}</span></div>
+    <div class="cpphase">${s.provider} / ${s.region} · ${s.machine} · pods ${running?"активни":s.phase==="Degraded"?"активни (деградирал)":scheduling?"стартират…":s.phase==="Hibernated"?"спрени":"—"}</div>
+    <div class="pods" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:9px">${comps}</div>`;
+  el.onclick = (ev) => {
+    const c = ev.target.closest(".comp[data-explain]");
+    if (c) { ev.stopPropagation(); showExplain(c.dataset.explain); return; }
+    ev.stopPropagation(); selectShoot(s.id);
+  };
+  return el;
+}
+function phaseLabel(p) {
+  return { Pending:"Pending", Scheduling:"Планиране", Running:"Running",
+           Hibernated:"Приспан", Blocked:"Блокиран", Degraded:"Деградирал", Failed:"Грешка" }[p] || p;
+}
+
+// ---- Scheduler: find a matching, enabled seed ----
+function findSeed(shoot) {
+  for (const k of ["A","B"]) {
+    const sd = seeds[k];
+    if (sd.enabled && sd.provider===shoot.provider && sd.region===shoot.region) return k;
+  }
+  return null;
+}
+
+// ---- Shoot lifecycle (controllers on timers) ----
+function createShoot() {
+  const provider = $("selProvider").value;
+  const region = $("selRegion").value;
+  const machine = $("selMachine").value;
+  shootSeq++;
+  const s = {
+    id: "s"+shootSeq, name: "shoot-"+shootSeq,
+    provider, region, machine, seed:null, phase:"Pending", reason:"", hiber:false,
+  };
+  shoots.push(s);
+  selectedShootId = s.id;
+  flashActor("actor-apiserver");
+  liveWire("w-api-sched");
+  log(`Създаден ${s.name} (${provider}/${region}, ${machine}) — записан в API Server`, "ok");
+  render();
+
+  // validation: invalid machine type
+  if (!VALID_MACHINES.has(machine)) {
+    setTimeout(() => {
+      s.phase = "Blocked";
+      s.reason = `невалиден тип машина „${machine}“`;
+      log(`${s.name}: ВАЛИДАЦИЯТА се провали — ${s.reason}`, "err");
+      render(); if (selectedShootId===s.id) showShootPanel(s);
+    }, 700);
+    return;
+  }
+  // extension missing?
+  if (!extensions[provider]) {
+    setTimeout(() => {
+      s.phase = "Blocked";
+      s.reason = `липсва extension за „${provider}“`;
+      log(`${s.name}: БЛОКИРАН — ${s.reason}`, "err");
+      render(); if (selectedShootId===s.id) showShootPanel(s);
+    }, 700);
+    return;
+  }
+  // schedule onto a seed
+  setTimeout(() => scheduleShoot(s), 900);
+}
+
+function scheduleShoot(s) {
+  if (s.phase!=="Pending") return;
+  flashActor("actor-scheduler");
+  const k = findSeed(s);
+  if (!k) {
+    s.phase = "Pending";
+    s.reason = `няма наличен Seed за ${s.provider}/${s.region}`;
+    log(`Scheduler: ${s.name} остава PENDING — ${s.reason}`, "warn");
+    render(); if (selectedShootId===s.id) showShootPanel(s);
+    return;
+  }
+  s.seed = k; s.reason = "";
+  s.phase = "Scheduling";
+  liveWire(k==="A"?"w-sched-A":"w-sched-B");
+  log(`Scheduler: ${s.name} → Seed ${k} (съвпада ${s.provider}/${s.region}) ✓`, "ok");
+  render(); if (selectedShootId===s.id) showShootPanel(s);
+
+  // gardenlet brings up the control plane
+  setTimeout(() => {
+    flashGardenlet(k);
+    flashActor("actor-ext");
+    liveWire(k==="A"?"w-glet-A":"w-glet-B", 1600);
+    log(`gardenlet@Seed ${k}: деплойва контролен панел на ${s.name} (pods стартират)…`);
+    render();
+    setTimeout(() => {
+      s.phase = "Running";
+      s.conditions = healthConditions(s, true);
+      log(`${s.name}: контролният панел е RUNNING в Seed ${k} ✓`, "ok");
+      render(); if (selectedShootId===s.id) showShootPanel(s);
+    }, 1400);
+  }, 900);
+}
+
+function hibernate(s) {
+  if (s.phase!=="Running") return;
+  s.phase = "Hibernated"; s.hiber = true;
+  log(`${s.name}: приспан — контролният панел е скалиран надолу (pods спират)`, "warn");
+  render(); showShootPanel(s);
+}
+function wake(s) {
+  if (s.phase!=="Hibernated") return;
+  flashGardenlet(s.seed);
+  liveWire(s.seed==="A"?"w-glet-A":"w-glet-B");
+  s.phase = "Scheduling";
+  log(`${s.name}: събуждане — gardenlet вдига контролния панел отново…`);
+  render();
+  setTimeout(() => { s.phase="Running"; s.hiber=false; log(`${s.name}: отново RUNNING ✓`,"ok"); render(); if(selectedShootId===s.id) showShootPanel(s); }, 1300);
+}
+// Reconcile = gardenlet compares desired (API Server) vs actual, component by component.
+// May fail if the shoot's provider extension is unavailable (-> ControlPlaneHealthy=False -> Degraded).
+function reconcile(s) {
+  if ((s.phase!=="Running" && s.phase!=="Degraded") || !s.seed) return;
+  flashActor("actor-apiserver");
+  liveWire(s.seed==="A"?"w-glet-A":"w-glet-B", 1600);
+  log(`Reconcile: gardenlet чете желаното състояние на ${s.name} от API Server…`);
+  // step 1: gardenlet reads desired state, then walks the control-plane components
+  setTimeout(() => {
+    flashGardenlet(s.seed);
+    liveWire(s.seed==="A"?"w-glet-A":"w-glet-B", 1600);
+    const cp = $("cp-"+s.id);
+    const chips = cp ? Array.from(cp.querySelectorAll(".comp")) : [];
+    chips.forEach((c, i) => {
+      setTimeout(() => {
+        c.classList.remove("checking"); void c.offsetWidth; c.classList.add("checking");
+        setTimeout(() => c.classList.remove("checking"), 500);
+      }, i*220);
+    });
+    // step 2: extension step — gardenlet creates extension resource; may fail
+    const walkMs = chips.length*220 + 400;
+    setTimeout(() => {
+      flashActor("actor-ext");
+      if (!extensions[s.provider]) {
+        s.phase = "Degraded";
+        s.conditions = healthConditions(s, false);
+        s.reason = `extension „${s.provider}“ е недостъпна — ControlPlaneHealthy=False`;
+        log(`Reconcile: ${s.name}: extension „${s.provider}“ липсва → условие ControlPlaneHealthy=False → ДЕГРАДИРАН`, "err");
+      } else {
+        s.phase = "Running";
+        s.conditions = healthConditions(s, true);
+        s.reason = "";
+        log(`Reconcile: ${s.name}: всички условия са True — актуално = желано ✓`, "ok");
+      }
+      render(); if (selectedShootId===s.id) showShootPanel(s);
+    }, walkMs);
+  }, 700);
+}
+
+// derive shoot health conditions (True/False) — extensions contribute ControlPlaneHealthy
+function healthConditions(s, extOk) {
+  return {
+    ControlPlaneHealthy: extOk,
+    EveryNodeReady: extOk,
+    SystemComponentsHealthy: true,
+    ObservabilityComponentsHealthy: true,
+  };
+}
+function deleteShoot(s) {
+  shoots = shoots.filter(x => x.id!==s.id);
+  if (selectedShootId===s.id) selectedShootId = null;
+  log(`${s.name}: изтрит`, "warn");
+  render();
+  if (!selectedShootId) resetPanel();
+}
+
+// ---- Fault injection ----
+function toggleSeed(k) {
+  seeds[k].enabled = !seeds[k].enabled;
+  const btn = $(k==="A"?"btnToggleSeedA":"btnToggleSeedB");
+  btn.innerHTML = `<span class="ic">${seeds[k].enabled?"⛔":"✅"}</span> ${seeds[k].enabled?"Изключи":"Включи"} Seed ${k}`;
+  if (!seeds[k].enabled) {
+    log(`ПОВРЕДА: Seed ${k} е ИЗКЛЮЧЕН`, "err");
+    // shoots hosted here become blocked
+    for (const s of shoots.filter(x => x.seed===k && (x.phase==="Running"||x.phase==="Scheduling"||x.phase==="Hibernated"))) {
+      s.phase = "Blocked"; s.seed=null; s.reason = `Seed ${k} е недостъпен`;
+      log(`${s.name}: БЛОКИРАН — хостващият Seed ${k} отпадна`, "err");
+    }
+  } else {
+    log(`Seed ${k} е отново ВКЛЮЧЕН — чакащите shoots ще бъдат пренасрочени`, "ok");
+    for (const s of shoots.filter(x => x.phase==="Blocked" && x.reason && x.reason.includes("Seed"))) {
+      s.phase = "Pending"; s.reason = "";
+      setTimeout(() => scheduleShoot(s), 600);
+    }
+  }
+  render();
+}
+function toggleExt() {
+  extensions.aws = !extensions.aws;
+  const btn = $("btnToggleExt");
+  btn.innerHTML = `<span class="ic">🧩</span> ${extensions.aws?"Премахни":"Върни"} extension „aws“`;
+  flashActor("actor-ext");
+  if (!extensions.aws) {
+    log(`ПОВРЕДА: extension „aws“ е НЕДОСТЪПНА. Нови aws shoots се блокират; съществуващите ще деградират при следващ reconcile.`, "err");
+    // existing aws shoots do NOT die immediately — they degrade on next reconcile
+    for (const s of shoots.filter(x => x.provider==="aws" && (x.phase==="Running"||x.phase==="Degraded"))) {
+      setTimeout(() => reconcile(s), 500);
+    }
+  } else {
+    log(`extension „aws“ е върната — засегнатите shoots ще се оздравят при следващ reconcile.`, "ok");
+    // pending/blocked new aws shoots get re-scheduled
+    for (const s of shoots.filter(x => x.phase==="Blocked" && x.reason && x.reason.includes("extension"))) {
+      s.phase = "Pending"; s.reason=""; setTimeout(()=>scheduleShoot(s),600);
+    }
+    // degraded aws shoots recover on next reconcile
+    for (const s of shoots.filter(x => x.provider==="aws" && x.phase==="Degraded")) {
+      setTimeout(() => reconcile(s), 700);
+    }
+  }
+  render();
+}
+
+// ---- Selection + side panel ----
+function selectShoot(id) {
+  selectedShootId = id;
+  render();
+  const s = shoots.find(x => x.id===id);
+  if (s) showShootPanel(s);
+}
+function showShootPanel(s) {
+  const seedTxt = s.seed ? `Seed ${s.seed}` : "—";
+  let phaseExpl = {
+    Pending: "Чака Scheduler да му избере подходящ Seed.",
+    Scheduling: "Назначен е Seed; gardenlet вдига контролния панел.",
+    Running: "Контролният панел работи като pods вътре в своя Seed.",
+    Hibernated: "Приспан — контролният панел е скалиран надолу, за да пести ресурси.",
+    Blocked: "Блокиран — виж причината по-долу.",
+    Degraded: "Деградирал — pods-овете още работят, но reconcile не минава чисто. Виж health условията по-долу.",
+    Failed: "Грешка.",
+  }[s.phase] || "";
+  const reason = s.reason ? `<p style="color:var(--danger)"><b>Причина:</b> ${s.reason}</p>` : "";
+  const condOrder = ["ControlPlaneHealthy","EveryNodeReady","SystemComponentsHealthy","ObservabilityComponentsHealthy"];
+  const conditionsHtml = s.conditions ? `
+    <div class="talks"><h4>Health условия (status.conditions)</h4><ul style="list-style:none;padding:0">${
+      condOrder.map(c => {
+        const ok = s.conditions[c];
+        return `<li style="color:${ok?"var(--accent)":"var(--danger)"};margin-bottom:5px">${ok?"✓":"✗"} ${c}: <b>${ok?"True":"False"}</b></li>`;
+      }).join("")
+    }</ul></div>` : "";
+  $("explainPanel").innerHTML = `
+    <h3>🧩 ${s.name}</h3>
+    <div class="kind">Shoot · ${phaseLabel(s.phase)}</div>
+    <p>Клъстер на краен потребител. Параметри: <b>${s.provider} / ${s.region}</b>, машина <b>${s.machine}</b>.</p>
+    <p><b>Хостващ Seed:</b> ${seedTxt}</p>
+    <p>${phaseExpl}</p>
+    ${reason}
+    ${conditionsHtml}
+    <div class="talks"><h4>Какво става сега</h4><ul>
+      <li>Желаното състояние се пази в API Server (Garden).</li>
+      <li>Контролният панел (pods) живее ВЪТРЕ в ${seedTxt}.</li>
+      <li>gardenlet непрекъснато го реконсилира към желаното състояние.</li>
+    </ul></div>`;
+  updateControls();
+}
+function showExplain(key) {
+  selectedShootId = null; render();
+  const e = EXPLAIN[key];
+  if (!e) return;
+  $("explainPanel").innerHTML = `
+    <h3>${e.icon} ${e.name}</h3>
+    <div class="kind">${e.kind}</div>
+    <p>${e.text}</p>
+    <div class="talks"><h4>С кого говори</h4><ul>${e.talks.map(t=>`<li>${t}</li>`).join("")}</ul></div>`;
+  updateControls();
+}
+function resetPanel() {
+  $("explainPanel").innerHTML = `<div class="placeholder"><strong>Няма избран елемент.</strong><br><br>Кликни върху актьор, Seed или контролен панел, за да видиш обяснение.</div>`;
+  updateControls();
+}
+
+function updateControls() {
+  const s = shoots.find(x => x.id===selectedShootId);
+  const has = !!s;
+  $("selInfo").textContent = has ? `${s.name} — ${phaseLabel(s.phase)}${s.seed?` в Seed ${s.seed}`:""}` : "Кликни върху контролен панел в диаграмата, за да го избереш.";
+  $("btnHibernate").disabled = !(has && s.phase==="Running");
+  $("btnWake").disabled      = !(has && s.phase==="Hibernated");
+  $("btnReconcile").disabled = !(has && (s.phase==="Running" || s.phase==="Degraded"));
+  $("btnDelete").disabled    = !has;
+}
+
+// ---- Wire up events ----
+$("btnCreate").onclick = createShoot;
+$("btnHibernate").onclick = () => { const s=cur(); if(s) hibernate(s); };
+$("btnWake").onclick      = () => { const s=cur(); if(s) wake(s); };
+$("btnReconcile").onclick = () => { const s=cur(); if(s) reconcile(s); };
+$("btnDelete").onclick    = () => { const s=cur(); if(s) deleteShoot(s); };
+$("btnToggleSeedA").onclick = () => toggleSeed("A");
+$("btnToggleSeedB").onclick = () => toggleSeed("B");
+$("btnToggleExt").onclick = toggleExt;
+function cur(){ return shoots.find(x=>x.id===selectedShootId); }
+
+// clicking actors / seeds / garden opens explanation
+document.querySelectorAll("[data-explain]").forEach(el => {
+  el.addEventListener("click", (ev) => {
+    if (ev.target.closest(".cp")) return; // CP has its own handler
+    ev.stopPropagation();
+    showExplain(el.dataset.explain);
+  });
+});
+
+// ---- Ambient reconcile pulse: periodically light a wire + flash gardenlet ----
+setInterval(() => {
+  const running = shoots.filter(s => s.phase==="Running");
+  if (!running.length) {
+    // idle heartbeat on api<->scheduler
+    liveWire("w-api-sched", 700);
+    return;
+  }
+  const s = running[Math.floor(Math.random()*running.length)];
+  flashGardenlet(s.seed, 700);
+  liveWire(s.seed==="A"?"w-glet-A":"w-glet-B", 900);
+  const cp = $("cp-"+s.id);
+  if (cp) { cp.classList.remove("reconciling"); void cp.offsetWidth; cp.classList.add("reconciling"); }
+}, 3200);
+
+// ---- init ----
+log("Gardener Playground зареден. Garden + 2 Seeds са готови.", "ok");
+render();
+setTimeout(drawWires, 60);
+</script>
+</body>
+</html>
