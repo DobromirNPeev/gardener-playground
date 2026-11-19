@@ -275,6 +275,28 @@
   .side .talks li { font-size: 12.5px; color: var(--muted); margin-bottom: 5px; line-height: 1.4; }
   .side .placeholder { color: var(--muted); font-size: 13px; line-height: 1.6; }
 
+  /* extension reconcile flow in the side panel */
+  .extflow { list-style: none; margin: 0; padding: 0; position: relative; }
+  .extstep { position: relative; padding: 0 0 12px 20px; border-left: 2px solid rgba(255,255,255,.1); margin-left: 5px; }
+  .extstep:last-child { padding-bottom: 0; }
+  .extstep::before { content: ""; position: absolute; left: -6px; top: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .extstep.ok { border-left-color: rgba(90,209,168,.4); }
+  .extstep.ok::before { background: var(--accent); box-shadow: 0 0 5px rgba(90,209,168,.6); }
+  .extstep.bad { border-left-color: rgba(230,107,107,.4); }
+  .extstep.bad::before { background: var(--danger); }
+  .extstep.stale { border-left-color: rgba(201,168,76,.4); }
+  .extstep.stale::before { background: #c9a84c; box-shadow: 0 0 5px rgba(201,168,76,.5); }
+  .extstep.paused::before { background: #c9a84c; }
+  .exthead { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+  .exthead .ci { font-size: 13px; }
+  .extname { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
+  .extstate { margin-left: auto; font-size: 10.5px; font-family: var(--font-mono); }
+  .extstep.ok .extstate { color: var(--accent); }
+  .extstep.bad .extstate { color: var(--danger); }
+  .extstep.stale .extstate { color: #c9a84c; }
+  .extstep.paused .extstate { color: #c9a84c; }
+  .extdesc { font-size: 11.5px; color: var(--muted); line-height: 1.4; margin-top: 3px; }
+
   /* log */
   .log { margin-top: 10px; }
   .log h2 { margin-bottom: 6px; }
@@ -575,7 +597,7 @@ const SCENARIOS = [
       { provider:"gcp", region:"europe-west3", machine:"n2-standard-4", targetPhase:"Running" },
     ] },
   { id:"ext-degraded", name:"🧩 Degraded by extension",
-    desc:"The aws extension is down — existing aws shoots are Degraded (ControlPlaneHealthy=False).",
+    desc:"The aws extension controller is down — existing aws shoots go Degraded (ControlPlaneHealthy=Unknown, no heartbeat). Pods keep running.",
     seeds:{}, extensions:{ aws:false },
     shoots:[
       { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Degraded" },
@@ -618,6 +640,18 @@ seeds.C.bodyEl = document.getElementById("seedC-body");
 
 const extensions = { aws:true, gcp:true, azure:true }; // availability
 const VALID_MACHINES = new Set(["m5.large","n2-standard-4"]);
+
+// Extension reconcile contract: the gardenlet drives these provider extension
+// resources during a reconcile. Each is a separate CRD, but ALL are served by the
+// same provider extension controller (e.g. provider-aws). Order: Infrastructure
+// first; Worker last (it depends on the others). If that one controller is
+// unavailable, none of them reconcile and their health reports go stale.
+const EXTENSION_FLOW = [
+  { key:"Infrastructure", icon:"🏗️", desc:"Provisions cloud infrastructure: VPC, subnets, security groups, IAM roles." },
+  { key:"ControlPlane",   icon:"🗄️", desc:"Wires up the provider-specific control-plane bits (cloud-controller-manager, CSI driver)." },
+  { key:"Worker",         icon:"🖥️", desc:"Creates the machines/node pools the shoot's worker nodes run on." },
+  { key:"DNSRecord",      icon:"📇", desc:"Publishes DNS records (the shoot's API server endpoint, ingress)." },
+];
 
 let shoots = [];       // array of shoot objects
 let shootSeq = 0;
@@ -935,7 +969,7 @@ function applyScenario(id) {
         // place CP on a matching seed even if extension is down (it was scheduled before)
         s.seed = k || matchingSeedIgnoringEnabled(s);
         s.phase="Degraded"; s.conditions=healthConditions(s,false);
-        s.reason=`the "${s.provider}" extension is unavailable — ControlPlaneHealthy=False`;
+        s.reason=`the "${s.provider}" extension controller sends no heartbeat — ControlPlaneHealthy=Unknown (report is stale)`;
         break;
     }
     shoots.push(s);
@@ -1098,7 +1132,8 @@ function wake(s) {
   setTimeout(() => { s.phase="Running"; s.hiber=false; log(`${s.name}: RUNNING again ✓`,"ok"); render(); if(selectedShootId===s.id) showShootPanel(s); }, ms(1300));
 }
 // Reconcile = gardenlet compares desired (API Server) vs actual, component by component.
-// May fail if the shoot's provider extension is unavailable (-> ControlPlaneHealthy=False -> Degraded).
+// May go Degraded if the provider extension controller is unavailable (no heartbeat
+// -> ControlPlaneHealthy=Unknown). Pods keep running; it's a health signal, not a kill.
 function reconcile(s) {
   if ((s.phase!=="Running" && s.phase!=="Degraded") || !s.seed) return;
   flashActor("actor-apiserver");
@@ -1124,8 +1159,8 @@ function reconcile(s) {
       if (!extensions[s.provider]) {
         s.phase = "Degraded";
         s.conditions = healthConditions(s, false);
-        s.reason = `the "${s.provider}" extension is unavailable — ControlPlaneHealthy=False`;
-        log(`Reconcile: ${s.name}: the "${s.provider}" extension is missing → condition ControlPlaneHealthy=False → DEGRADED`, "err");
+        s.reason = `the "${s.provider}" extension controller sends no heartbeat — ControlPlaneHealthy=Unknown (report is stale)`;
+        log(`Reconcile: ${s.name}: the "${s.provider}" extension controller is unavailable → no heartbeat → ControlPlaneHealthy=Unknown → DEGRADED (pods keep running)`, "err");
       } else {
         s.phase = "Running";
         s.conditions = healthConditions(s, true);
@@ -1137,13 +1172,18 @@ function reconcile(s) {
   }, ms(700));
 }
 
-// derive shoot health conditions (True/False) — extensions contribute ControlPlaneHealthy
+// derive shoot health conditions — tri-state like real Gardener: True / False / Unknown.
+// An UNAVAILABLE provider extension sends no heartbeat, so its health report goes
+// stale and the conditions it owns become Unknown (not False — that's for a live-but-
+// unhealthy component). Pods keep running either way.
 function healthConditions(s, extOk) {
+  const extState = extOk ? "True" : "Unknown";
   return {
-    ControlPlaneHealthy: extOk,
-    EveryNodeReady: extOk,
-    SystemComponentsHealthy: true,
-    ObservabilityComponentsHealthy: true,
+    ControlPlaneHealthy: extState,
+    EveryNodeReady: s.workerless ? null : extState, // workerless shoots have no EveryNodeReady
+    SystemComponentsHealthy: "True",
+    ObservabilityComponentsHealthy: "True",
+    APIServerAvailable: "True", // Gardener-owned; extensions can't touch it
   };
 }
 function deleteShoot(s) {
@@ -1219,14 +1259,46 @@ function showShootPanel(s) {
     Failed: "Failed.",
   }[s.phase] || "";
   const reason = s.reason ? `<p style="color:var(--danger)"><b>Reason:</b> ${s.reason}</p>` : "";
-  const condOrder = ["ControlPlaneHealthy","EveryNodeReady","SystemComponentsHealthy","ObservabilityComponentsHealthy"];
+  const condOrder = ["APIServerAvailable","ControlPlaneHealthy","EveryNodeReady","SystemComponentsHealthy","ObservabilityComponentsHealthy"];
+  const condStyle = { True:{c:"var(--accent)",m:"✓"}, False:{c:"var(--danger)",m:"✗"}, Unknown:{c:"#c9a84c",m:"?"} };
   const conditionsHtml = s.conditions ? `
     <div class="talks"><h4>Health conditions (status.conditions)</h4><ul style="list-style:none;padding:0">${
       condOrder.map(c => {
-        const ok = s.conditions[c];
-        return `<li style="color:${ok?"var(--accent)":"var(--danger)"};margin-bottom:5px">${ok?"✓":"✗"} ${c}: <b>${ok?"True":"False"}</b></li>`;
+        const v = s.conditions[c];
+        if (v == null) return ""; // condition not present for this shoot (e.g. workerless)
+        const st = condStyle[v] || condStyle.Unknown;
+        return `<li style="color:${st.c};margin-bottom:5px">${st.m} ${c}: <b>${v}</b></li>`;
       }).join("")
     }</ul></div>` : "";
+  // extension reconcile contract — the resources the gardenlet drives for this shoot.
+  // all of them are served by the SAME provider extension controller, so if that
+  // controller is unavailable NONE of them reconcile (not just "after Infrastructure").
+  // A missing controller sends no heartbeat → the report goes stale (Unknown), rather
+  // than reporting an unhealthy component (False). Pods keep running regardless.
+  const hasCP = s.seed && (s.phase==="Running" || s.phase==="Degraded" || s.phase==="Hibernated");
+  const extOk = extensions[s.provider] !== false;
+  const extFlowHtml = hasCP ? `
+    <div class="talks"><h4>Extension reconcile (${s.provider})</h4>
+      <p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;line-height:1.45">${
+        extOk
+          ? `The <code>provider-${s.provider}</code> extension controller drives these resources (Infrastructure first; Worker last — it depends on the others):`
+          : `The <code>provider-${s.provider}</code> extension controller is unavailable — it sends no heartbeat, so every resource it owns goes stale (status Unknown). The pods keep running.`
+      }</p>
+      <ol class="extflow">${
+        EXTENSION_FLOW
+          .filter(step => !(s.workerless && step.key==="Worker")) // workerless shoots skip Worker
+          .map(step => {
+          let label, cls;
+          if (s.phase==="Hibernated") { label="⏸ paused"; cls="paused"; }
+          else if (!extOk) { label="? no heartbeat"; cls="stale"; }
+          else { label="✓ reconciled"; cls="ok"; }
+          return `<li class="extstep ${cls}">
+            <div class="exthead"><span class="ci">${step.icon}</span><span class="extname">${step.key}</span>
+              <span class="extstate">${label}</span></div>
+            <div class="extdesc">${step.desc}</div></li>`;
+        }).join("")
+      }</ol>
+    </div>` : "";
   $("explainPanel").innerHTML = `
     <h3>🧩 ${s.name}</h3>
     <div class="kind">Shoot · ${phaseLabel(s.phase)}</div>
@@ -1235,6 +1307,7 @@ function showShootPanel(s) {
     <p>${phaseExpl}</p>
     ${reason}
     ${conditionsHtml}
+    ${extFlowHtml}
     <div class="talks"><h4>What is happening now</h4><ul>
       <li>The desired state is kept in the API Server (Garden).</li>
       <li>The control plane (pods) lives INSIDE ${seedTxt}.</li>
