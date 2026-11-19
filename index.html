@@ -289,9 +289,12 @@
   .logline.warn b { color: var(--warn); }
   .logline.err b { color: var(--danger); }
 
-  .wire { stroke: transparent; stroke-width: 1.5; fill: none; transition: stroke .3s; }
+  .wire { stroke: transparent; stroke-width: 1.5; fill: none; transition: stroke .3s, opacity .3s; }
   .wire.shoot-wire { stroke: rgba(106,138,214,.45); stroke-width: 1.8; stroke-dasharray: 2 4; }
   .wire.live { stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 6 8; animation: flow .8s linear infinite; filter: drop-shadow(0 0 4px rgba(90,209,168,.6)); }
+  /* when hovering a shoot, dim every shoot wire except the highlighted one */
+  svg.wires.isolating .shoot-wire { opacity: .12; }
+  svg.wires.isolating .shoot-wire.highlight { opacity: 1; stroke: rgba(106,138,214,.95); stroke-width: 2.6; filter: drop-shadow(0 0 4px rgba(106,138,214,.5)); }
   @keyframes flow { to { stroke-dashoffset: -28; } }
 
   .legend { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.7; }
@@ -538,6 +541,10 @@ const CLUSTER_COMPONENTS = [
   { key:"w-coredns", icon:"📇", name:"CoreDNS" },
 ];
 const WORKER_NODE_COUNT = 2;
+// global pacing multiplier for lifecycle animations — higher = slower, so each
+// step (schedule → deploy → run) is easy to follow. Delays below are × STEP.
+const STEP = 1.7;
+const ms = n => Math.round(n * STEP);
 
 // ---- Scenarios (declarative: menu picks one, whole overview reloads) ----
 // Each shoot entry instantiates directly in targetPhase (no full lifecycle animation).
@@ -588,6 +595,15 @@ const SCENARIOS = [
       { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
       { provider:"azure", region:"us-east-1", machine:"m5.large", targetPhase:"Pending", promoteToSeed:"C" },
     ] },
+  { id:"multi-region", name:"🌍 Multi-region",
+    desc:"Three Seeds across three regions (aws/eu-west-1, gcp/europe-west3, azure/us-east-1). The scheduler routes each shoot to the Seed whose provider and region match.",
+    seeds:{ C:true }, extensions:{},
+    shoots:[
+      { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
+      { provider:"gcp", region:"europe-west3", machine:"n2-standard-4", targetPhase:"Running" },
+      { provider:"azure", region:"us-east-1", machine:"m5.large", targetPhase:"Running" },
+      { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
+    ] },
 ];
 
 // ---- World state ----
@@ -634,13 +650,29 @@ const WIRE_DEFS = [
   { id:"w-glet-B",  from:"actor-apiserver", to:"gardenlet-B" },
   { id:"w-api-sched", from:"actor-apiserver", to:"actor-scheduler" },
 ];
+// Seed C is dynamic (hidden by default); register its wires when it appears
+function addSeedCWires() {
+  const defs = [
+    { id:"w-sched-C", from:"actor-scheduler", to:"box-seedC" },
+    { id:"w-glet-C",  from:"actor-apiserver", to:"gardenlet-C" },
+  ];
+  for (const d of defs) if (!WIRE_DEFS.some(w => w.id===d.id)) WIRE_DEFS.push(d);
+}
 function edgePath(a, b) {
   // connect from right edge of a to left edge of b (horizontal flow)
   const s = $("canvas").getBoundingClientRect();
+  const stage = $("canvas").parentElement.getBoundingClientRect();
+  // keep endpoints inside the visible stage: a box scrolled out of its column
+  // anchors its wire to the stage edge instead of shooting off-screen
+  const top = 8, bottom = stage.height - 8;
+  const clampY = y => Math.max(top, Math.min(bottom, y));
   const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-  const p1 = { x: ra.right - s.left, y: ra.top - s.top + ra.height/2 };
-  const p2 = { x: rb.left - s.left,  y: rb.top - s.top + rb.height/2 };
-  const dx = Math.max(40, (p2.x - p1.x) * 0.5);
+  const p1 = { x: ra.right - s.left, y: clampY(ra.top - s.top + ra.height/2) };
+  const p2 = { x: rb.left - s.left,  y: clampY(rb.top - s.top + rb.height/2) };
+  const dyAbs = Math.abs(p2.y - p1.y);
+  // the steeper the vertical drop, the wider the horizontal handles bow out,
+  // so steep connections curve gently instead of slicing diagonally across boxes
+  const dx = Math.max(40, (p2.x - p1.x) * 0.5) + Math.min(dyAbs * 0.45, 120);
   return `M ${p1.x} ${p1.y} C ${p1.x+dx} ${p1.y}, ${p2.x-dx} ${p2.y}, ${p2.x} ${p2.y}`;
 }
 function drawWires() {
@@ -663,8 +695,9 @@ function drawWires() {
     // draw from seed (right edge) to shoot box (left edge): seed hosts shoot's CP
     const path = document.createElementNS("http://www.w3.org/2000/svg","path");
     path.setAttribute("d", edgePath(seedBox, box));
-    path.setAttribute("class","wire shoot-wire");
+    path.setAttribute("class","wire shoot-wire" + (sh.id===selectedShootId ? " highlight" : ""));
     path.setAttribute("id", "w-shoot-"+sh.id);
+    path.dataset.shoot = sh.id;
     wiresSvg.appendChild(path);
   }
 }
@@ -672,6 +705,13 @@ function liveWire(id, ms=1200) {
   const el = $(id); if (!el) return;
   el.classList.add("live");
   setTimeout(() => el.classList.remove("live"), ms);
+}
+// isolate a single shoot's wire: highlight it, dim the rest (null clears)
+function highlightShootWire(shootId) {
+  wiresSvg.classList.toggle("isolating", shootId != null);
+  for (const p of wiresSvg.querySelectorAll(".shoot-wire")) {
+    p.classList.toggle("highlight", shootId != null && p.dataset.shoot === shootId);
+  }
 }
 function flashActor(id, ms=1200) {
   const el = $(id); if (!el) return;
@@ -682,6 +722,13 @@ function flashActor(id, ms=1200) {
 function flashGardenlet(k, ms=1200) { flashActor("gardenlet-"+k, ms); }
 
 window.addEventListener("resize", drawWires);
+// columns scroll independently; redraw wires so they track their boxes.
+// scroll doesn't bubble, so listen in the capture phase on the canvas.
+let wireRaf = 0;
+$("canvas").addEventListener("scroll", () => {
+  if (wireRaf) return;
+  wireRaf = requestAnimationFrame(() => { wireRaf = 0; drawWires(); });
+}, true);
 
 // ---- Rendering ----
 function render() {
@@ -780,6 +827,9 @@ function renderShootBox(s) {
     if (c) { ev.stopPropagation(); showExplain(c.dataset.explain); return; }
     ev.stopPropagation(); selectShoot(s.id);
   };
+  // hovering a shoot isolates its wire so a crowded landscape stays readable
+  el.onmouseenter = () => highlightShootWire(s.id);
+  el.onmouseleave = () => highlightShootWire(null);
   return el;
 }
 
@@ -842,14 +892,17 @@ function applyScenario(id) {
   const seedCBox = $("box-seedC");
   if (seedCBox) seedCBox.style.display = "none";
   seeds.C.enabled = false;
-  // drop any dynamic Seed-C wire from a previous ManagedSeed run
-  const idx = WIRE_DEFS.findIndex(w => w.id==="w-glet-C");
-  if (idx !== -1) WIRE_DEFS.splice(idx, 1);
+  // drop any dynamic Seed-C wires from a previous run
+  for (const wid of ["w-glet-C","w-sched-C"]) {
+    const i = WIRE_DEFS.findIndex(w => w.id===wid);
+    if (i !== -1) WIRE_DEFS.splice(i, 1);
+  }
   // 2. apply seed/extension overrides
   for (const k of Object.keys(sc.seeds||{})) {
     if (sc.seeds[k]===false) { seeds[k].enabled = false; const b=$(k==="A"?"btnToggleSeedA":"btnToggleSeedB"); if(b) b.innerHTML=`<span class="ic">✅</span> Enable Seed ${k}`; }
     if (sc.seeds[k]===true && k==="C") {
       seeds.C.enabled = true;
+      addSeedCWires();
       if (seedCBox) seedCBox.style.display = "";
     }
   }
@@ -888,7 +941,7 @@ function applyScenario(id) {
     shoots.push(s);
     if (def.promoteToSeed) {
       const seedKey = def.promoteToSeed;
-      setTimeout(() => promoteManagedSeed(s, seedKey), 3200);
+      setTimeout(() => promoteManagedSeed(s, seedKey), ms(1800));
     }
   }
   log(`Loaded scenario: ${sc.name}`, "ok");
@@ -942,20 +995,17 @@ function promoteManagedSeed(s, seedKey) {
         // mark the shoot as a ManagedSeed
         s.managedSeed = seedKey;
 
-        // wire: API Server → gardenlet in new seed
-        const wId = "w-glet-"+seedKey;
-        if (!WIRE_DEFS.some(w => w.id===wId)) {
-          WIRE_DEFS.push({ id: wId, from:"actor-apiserver", to:"gardenlet-"+seedKey });
-        }
+        // register Seed C's wires now that it exists
+        addSeedCWires();
         flashGardenlet(seedKey);
-        liveWire(wId, 1600);
+        liveWire("w-glet-"+seedKey, 1600);
 
         log(`ManagedSeed: Seed ${seedKey} (azure/us-east-1) is now REGISTERED — create an azure/us-east-1 shoot and it will be scheduled here ✓`, "ok");
         render();
         if (selectedShootId === s.id) showShootPanel(s);
-      }, 1200);
-    }, 1400);
-  }, 1100);
+      }, ms(1200));
+    }, ms(1400));
+  }, ms(1100));
 }
 
 // ---- Shoot lifecycle (controllers on timers) ----
@@ -982,7 +1032,7 @@ function createShoot() {
       s.reason = `invalid machine type "${machine}"`;
       log(`${s.name}: VALIDATION failed — ${s.reason}`, "err");
       render(); if (selectedShootId===s.id) showShootPanel(s);
-    }, 700);
+    }, ms(700));
     return;
   }
   // extension missing?
@@ -992,11 +1042,11 @@ function createShoot() {
       s.reason = `no extension for "${provider}"`;
       log(`${s.name}: BLOCKED — ${s.reason}`, "err");
       render(); if (selectedShootId===s.id) showShootPanel(s);
-    }, 700);
+    }, ms(700));
     return;
   }
   // schedule onto a seed
-  setTimeout(() => scheduleShoot(s), 900);
+  setTimeout(() => scheduleShoot(s), ms(900));
 }
 
 function scheduleShoot(s) {
@@ -1012,7 +1062,7 @@ function scheduleShoot(s) {
   }
   s.seed = k; s.reason = "";
   s.phase = "Scheduling";
-  liveWire(k==="A"?"w-sched-A":"w-sched-B");
+  liveWire("w-sched-"+k);
   log(`Scheduler: ${s.name} → Seed ${k} (matches ${s.provider}/${s.region}) ✓`, "ok");
   render(); if (selectedShootId===s.id) showShootPanel(s);
 
@@ -1020,7 +1070,7 @@ function scheduleShoot(s) {
   setTimeout(() => {
     flashGardenlet(k);
     flashActor("actor-ext");
-    liveWire(k==="A"?"w-glet-A":"w-glet-B", 1600);
+    liveWire("w-glet-"+k, 1600);
     log(`gardenlet@Seed ${k}: deploying the control plane of ${s.name} (pods starting)…`);
     render();
     setTimeout(() => {
@@ -1028,8 +1078,8 @@ function scheduleShoot(s) {
       s.conditions = healthConditions(s, true);
       log(`${s.name}: control plane is RUNNING in Seed ${k} ✓`, "ok");
       render(); if (selectedShootId===s.id) showShootPanel(s);
-    }, 1400);
-  }, 900);
+    }, ms(1400));
+  }, ms(900));
 }
 
 function hibernate(s) {
@@ -1041,33 +1091,34 @@ function hibernate(s) {
 function wake(s) {
   if (s.phase!=="Hibernated") return;
   flashGardenlet(s.seed);
-  liveWire(s.seed==="A"?"w-glet-A":"w-glet-B");
+  liveWire("w-glet-"+s.seed);
   s.phase = "Scheduling";
   log(`${s.name}: waking up — gardenlet brings the control plane back up…`);
   render();
-  setTimeout(() => { s.phase="Running"; s.hiber=false; log(`${s.name}: RUNNING again ✓`,"ok"); render(); if(selectedShootId===s.id) showShootPanel(s); }, 1300);
+  setTimeout(() => { s.phase="Running"; s.hiber=false; log(`${s.name}: RUNNING again ✓`,"ok"); render(); if(selectedShootId===s.id) showShootPanel(s); }, ms(1300));
 }
 // Reconcile = gardenlet compares desired (API Server) vs actual, component by component.
 // May fail if the shoot's provider extension is unavailable (-> ControlPlaneHealthy=False -> Degraded).
 function reconcile(s) {
   if ((s.phase!=="Running" && s.phase!=="Degraded") || !s.seed) return;
   flashActor("actor-apiserver");
-  liveWire(s.seed==="A"?"w-glet-A":"w-glet-B", 1600);
+  liveWire("w-glet-"+s.seed, 1600);
   log(`Reconcile: gardenlet reads the desired state of ${s.name} from the API Server…`);
   // step 1: gardenlet reads desired state, then walks the control-plane components
   setTimeout(() => {
     flashGardenlet(s.seed);
-    liveWire(s.seed==="A"?"w-glet-A":"w-glet-B", 1600);
+    liveWire("w-glet-"+s.seed, 1600);
     const cp = $("cp-"+s.id);
     const chips = cp ? Array.from(cp.querySelectorAll(".comp")) : [];
+    const stepMs = ms(320);
     chips.forEach((c, i) => {
       setTimeout(() => {
         c.classList.remove("checking"); void c.offsetWidth; c.classList.add("checking");
         setTimeout(() => c.classList.remove("checking"), 500);
-      }, i*220);
+      }, i*stepMs);
     });
     // step 2: extension step — gardenlet creates extension resource; may fail
-    const walkMs = chips.length*220 + 400;
+    const walkMs = chips.length*stepMs + ms(400);
     setTimeout(() => {
       flashActor("actor-ext");
       if (!extensions[s.provider]) {
@@ -1083,7 +1134,7 @@ function reconcile(s) {
       }
       render(); if (selectedShootId===s.id) showShootPanel(s);
     }, walkMs);
-  }, 700);
+  }, ms(700));
 }
 
 // derive shoot health conditions (True/False) — extensions contribute ControlPlaneHealthy
