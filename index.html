@@ -561,6 +561,13 @@ const SCENARIOS = [
       { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Degraded" },
       { provider:"gcp", region:"europe-west3", machine:"n2-standard-4", targetPhase:"Running" },
     ] },
+  { id:"workerless", name:"🪄 Workerless shoot",
+    desc:"A workerless shoot has no worker nodes — only a control plane. Used for extension-only or infrastructure-only clusters.",
+    seeds:{}, extensions:{},
+    shoots:[
+      { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
+      { provider:"gcp", region:"europe-west3", machine:"n2-standard-4", targetPhase:"Running", workerless:true },
+    ] },
 ];
 
 // ---- World state ----
@@ -719,7 +726,9 @@ function renderShootBox(s) {
     ? `🔗 my control plane lives in <b>Seed ${s.seed}</b>`
     : (pending ? "⏳ no hosting Seed yet" : "");
   let body;
-  if (s.phase==="Running") {
+  if (s.workerless && s.phase==="Running") {
+    body = `<div class="comp dim"><span class="cd">🪄 workerless — no worker nodes. The control plane in Seed ${s.seed||"?"} handles extension or infrastructure tasks only.</span></div>`;
+  } else if (s.phase==="Running") {
     // one box per worker node, each with per-node components
     const nodeComps = NODE_COMPONENTS.map(c =>
       `<div class="comp" data-explain="${c.key}"><span class="ci">${c.icon}</span><span class="cn">${c.name}</span></div>`).join("");
@@ -816,7 +825,8 @@ function applyScenario(id) {
     shootSeq++;
     const s = { id:"s"+shootSeq, name:"shoot-"+shootSeq,
       provider:def.provider, region:def.region, machine:def.machine,
-      seed:null, phase:"Pending", reason:"", hiber:false, conditions:null };
+      seed:null, phase:"Pending", reason:"", hiber:false, conditions:null,
+      workerless: def.workerless || false };
     const k = findSeed(s);
     switch (def.targetPhase) {
       case "Running":

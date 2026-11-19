@@ -26,6 +26,9 @@ lifecycle (create → schedule → run → hibernate → reconcile).
   like `ControlPlaneHealthy = False`, the same mechanism Gardener uses).
 - **Click any component** (in the garden, in a seed, or on a shoot's worker node) to read
   a short plain-language explanation of what it does and what it talks to.
+- **Load a scenario** from the dropdown at the top of the left panel to jump straight into
+  a pre-built landscape: a healthy cluster, an unschedulable shoot, a seed outage, or a
+  shoot degraded by a missing extension — no manual setup needed.
 
 ## The three columns
 
