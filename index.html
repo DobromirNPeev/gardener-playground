@@ -174,6 +174,8 @@
     border: 1px solid rgba(90,209,168,.3); background: rgba(90,209,168,.08);
     border-radius: 20px; padding: 1px 8px;
   }
+  @keyframes ms-appear { from { opacity:0; transform:translateY(-12px) scale(.97); } to { opacity:1; transform:none; } }
+  .ms-appear { animation: ms-appear .6s cubic-bezier(.22,1,.36,1) both; }
   /* static seed infrastructure (gardenlet always present) */
   .seed-infra { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; margin-bottom: 4px; }
   .seed-body {
@@ -415,6 +417,14 @@
           </div>
           <div class="seed-body" id="seedB-body"><div class="empty">no control planes here</div></div>
         </div>
+        <div class="box seed" id="box-seedC" data-explain="seedC" style="display:none">
+          <div class="title"><span class="dot"></span> Seed C <span class="region">azure / us-east-1</span><span class="count" id="seedC-count">0 planes</span></div>
+          <div class="tag">🌱 This seed IS a shoot (ManagedSeed) — bootstrapped from the shoot below it</div>
+          <div class="seed-infra">
+            <div class="comp" id="gardenlet-C" data-explain="gardenlet"><span class="ci">🤖</span><div><span class="cn">gardenlet</span> <span class="cd">— deployed here by Gardener after the shoot became a seed</span></div></div>
+          </div>
+          <div class="seed-body" id="seedC-body"><div class="empty">no control planes here</div></div>
+        </div>
       </div>
 
       <!-- SHOOTS (third column — the shoot clusters' own worker-node side) -->
@@ -480,6 +490,9 @@ const EXPLAIN = {
   seedB: { icon:"🌿", kind:"Seed cluster", name:"Seed B",
     text:"Seed B is profiled for gcp / europe-west3. Only shoots with that provider and region can be assigned here. If you disable it, shoots relying on it can no longer be served.",
     talks:["Accepts only gcp/europe-west3 shoots","Its gardenlet talks to the Garden API Server"] },
+  seedC: { icon:"🌿", kind:"Seed cluster (ManagedSeed)", name:"Seed C",
+    text:"Seed C is a ManagedSeed — it was itself a Shoot cluster that Gardener registered as a Seed. Gardener first created it as a normal shoot (you can see it in the right column), then installed a gardenlet inside it and registered it as a seed. It shares the same provider/region profile as Seed A (aws / eu-west-1) — new shoots can now be scheduled here too. This is how operators expand capacity: provision a new cluster via Gardener, then promote it into a Seed.",
+    talks:["Was a Shoot before it became a Seed","Gardener installed the gardenlet here automatically","Shares aws/eu-west-1 profile with Seed A — new shoots may land here"] },
   // shoot control-plane components (live as pods INSIDE the seed)
   "cp-kube-apiserver": { icon:"🗄️", kind:"Shoot control plane (in Seed)", name:"kube-apiserver",
     text:"The API server of the shoot cluster itself. It runs as a pod INSIDE the Seed, not on the workers. The worker nodes and their kubelets talk through it.",
@@ -568,15 +581,24 @@ const SCENARIOS = [
       { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
       { provider:"gcp", region:"europe-west3", machine:"n2-standard-4", targetPhase:"Running", workerless:true },
     ] },
+  { id:"managed-seed", name:"🌿 ManagedSeed",
+    desc:"There's no Seed for azure/us-east-1 yet, so that shoot can't be scheduled. Watch Gardener promote it into Seed C — then new azure/us-east-1 shoots can be scheduled there.",
+    seeds:{}, extensions:{},
+    shoots:[
+      { provider:"aws", region:"eu-west-1", machine:"m5.large", targetPhase:"Running" },
+      { provider:"azure", region:"us-east-1", machine:"m5.large", targetPhase:"Pending", promoteToSeed:"C" },
+    ] },
 ];
 
 // ---- World state ----
 const seeds = {
   A: { id:"A", label:"Seed A", provider:"aws", region:"eu-west-1", enabled:true, bodyEl:null },
   B: { id:"B", label:"Seed B", provider:"gcp", region:"europe-west3", enabled:true, bodyEl:null },
+  C: { id:"C", label:"Seed C", provider:"azure", region:"us-east-1", enabled:false, bodyEl:null },
 };
 seeds.A.bodyEl = document.getElementById("seedA-body");
 seeds.B.bodyEl = document.getElementById("seedB-body");
+seeds.C.bodyEl = document.getElementById("seedC-body");
 
 const extensions = { aws:true, gcp:true, azure:true }; // availability
 const VALID_MACHINES = new Set(["m5.large","n2-standard-4"]);
@@ -664,12 +686,13 @@ window.addEventListener("resize", drawWires);
 // ---- Rendering ----
 function render() {
   // seeds enabled/disabled styling
-  for (const k of ["A","B"]) {
+  for (const k of ["A","B","C"]) {
     const box = $("box-seed"+k);
+    if (!box || box.style.display==="none") continue;
     box.classList.toggle("disabled", !seeds[k].enabled);
   }
   // clear seed bodies
-  for (const k of ["A","B"]) {
+  for (const k of ["A","B","C"]) {
     seeds[k].bodyEl.innerHTML = "";
   }
   // pending tray
@@ -689,7 +712,8 @@ function render() {
     tray.style.display = "none";
   }
   // control planes inside seeds
-  for (const k of ["A","B"]) {
+  for (const k of ["A","B","C"]) {
+    if ($("box-seed"+k) && $("box-seed"+k).style.display==="none") continue;
     const list = shoots.filter(s => s.seed === k && s.phase!=="Pending" && s.phase!=="Blocked");
     const cnt = $("seed"+k+"-count");
     if (cnt) cnt.textContent = list.length + (list.length===1 ? " plane" : " planes");
@@ -726,7 +750,9 @@ function renderShootBox(s) {
     ? `🔗 my control plane lives in <b>Seed ${s.seed}</b>`
     : (pending ? "⏳ no hosting Seed yet" : "");
   let body;
-  if (s.workerless && s.phase==="Running") {
+  if (s.managedSeed && s.phase==="Running") {
+    body = `<div class="comp dim"><span class="cd">🌿 ManagedSeed — this shoot was promoted to <b>Seed ${s.managedSeed}</b>. Gardener installed a gardenlet inside it and registered it as a Seed. It can now host shoot control planes itself. See Seed ${s.managedSeed} in the middle column.</span></div>`;
+  } else if (s.workerless && s.phase==="Running") {
     body = `<div class="comp dim"><span class="cd">🪄 workerless — no worker nodes. The control plane in Seed ${s.seed||"?"} handles extension or infrastructure tasks only.</span></div>`;
   } else if (s.phase==="Running") {
     // one box per worker node, each with per-node components
@@ -745,7 +771,7 @@ function renderShootBox(s) {
     body = `<div class="comp dim"><span class="cd">worker nodes not ready yet (${phaseLabel(s.phase)})</span></div>`;
   }
   el.innerHTML = `
-    <div class="shtitle">🌱 ${s.name} <span class="badge ${s.phase}" style="margin-left:auto">${phaseLabel(s.phase)}</span></div>
+    <div class="shtitle">🌱 ${s.name} <span class="badge ${s.phase}" style="margin-left:auto">${phaseLabel(s.phase)}</span>${s.managedSeed ? ` <span class="badge" style="background:rgba(90,209,168,.15);color:var(--accent);border:1px solid rgba(90,209,168,.3)">🌿 Seed ${s.managedSeed}</span>` : ""}</div>
     <div class="shmeta">${s.provider} / ${s.region} · ${s.machine}</div>
     <div class="worker-comps">${body}</div>
     <div class="seedref">${seedRef}</div>`;
@@ -788,7 +814,7 @@ function phaseLabel(p) {
 
 // ---- Scheduler: find a matching, enabled seed ----
 function findSeed(shoot) {
-  for (const k of ["A","B"]) {
+  for (const k of ["A","B","C"]) {
     const sd = seeds[k];
     if (sd.enabled && sd.provider===shoot.provider && sd.region===shoot.region) return k;
   }
@@ -812,9 +838,20 @@ function applyScenario(id) {
   shoots = []; shootSeq = 0; selectedShootId = null;
   resetSeedButton("A"); resetSeedButton("B"); resetExtButton();
   extensions.gcp = true; extensions.azure = true;
+  // hide seed C by default; show only when the scenario enables it
+  const seedCBox = $("box-seedC");
+  if (seedCBox) seedCBox.style.display = "none";
+  seeds.C.enabled = false;
+  // drop any dynamic Seed-C wire from a previous ManagedSeed run
+  const idx = WIRE_DEFS.findIndex(w => w.id==="w-glet-C");
+  if (idx !== -1) WIRE_DEFS.splice(idx, 1);
   // 2. apply seed/extension overrides
   for (const k of Object.keys(sc.seeds||{})) {
     if (sc.seeds[k]===false) { seeds[k].enabled = false; const b=$(k==="A"?"btnToggleSeedA":"btnToggleSeedB"); if(b) b.innerHTML=`<span class="ic">✅</span> Enable Seed ${k}`; }
+    if (sc.seeds[k]===true && k==="C") {
+      seeds.C.enabled = true;
+      if (seedCBox) seedCBox.style.display = "";
+    }
   }
   for (const k of Object.keys(sc.extensions||{})) {
     extensions[k] = sc.extensions[k];
@@ -826,7 +863,9 @@ function applyScenario(id) {
     const s = { id:"s"+shootSeq, name:"shoot-"+shootSeq,
       provider:def.provider, region:def.region, machine:def.machine,
       seed:null, phase:"Pending", reason:"", hiber:false, conditions:null,
-      workerless: def.workerless || false };
+      workerless: def.workerless || false,
+      managedSeed: def.managedSeed || null,
+      promoteToSeed: def.promoteToSeed || null };
     const k = findSeed(s);
     switch (def.targetPhase) {
       case "Running":
@@ -847,14 +886,76 @@ function applyScenario(id) {
         break;
     }
     shoots.push(s);
+    if (def.promoteToSeed) {
+      const seedKey = def.promoteToSeed;
+      setTimeout(() => promoteManagedSeed(s, seedKey), 3200);
+    }
   }
   log(`Loaded scenario: ${sc.name}`, "ok");
   render();
   resetPanel();
 }
 function matchingSeedIgnoringEnabled(shoot) {
-  for (const k of ["A","B"]) if (seeds[k].provider===shoot.provider && seeds[k].region===shoot.region) return k;
+  for (const k of ["A","B","C"]) if (seeds[k].provider===shoot.provider && seeds[k].region===shoot.region) return k;
   return null;
+}
+
+// ---- ManagedSeed promotion flow ----
+// Starts from a Pending shoot that has no Seed for its provider/region.
+// Gardener bootstraps it, then registers it as a new Seed so future shoots can land there.
+function promoteManagedSeed(s, seedKey) {
+  const alive = () => shoots.includes(s);
+  if (!alive()) return;
+  // Phase 1: bootstrap the shoot into a running cluster (no existing Seed hosts it —
+  // Gardener uses a bootstrap mechanism; we show it coming up directly).
+  log(`gardener-controller-manager: bootstrapping ${s.name} (azure/us-east-1) — no Seed exists for this region yet…`);
+  flashActor("actor-cm");
+
+  setTimeout(() => {
+    if (!alive()) return;
+    s.phase = "Running";
+    s.workerless = true;  // a ManagedSeed is a workerless shoot — no worker nodes of its own
+    s.conditions = healthConditions(s, true);
+    s.reason = "";
+    log(`${s.name}: bootstrapped and RUNNING — now Gardener will register it as a Seed`, "ok");
+    render();
+    if (selectedShootId === s.id) showShootPanel(s);
+
+    // Phase 2: install gardenlet + register as Seed
+    setTimeout(() => {
+      if (!alive()) return;
+      log(`ManagedSeed: Gardener is installing a gardenlet inside ${s.name}…`);
+      flashActor("actor-apiserver");
+      liveWire("w-api-sched");
+
+      setTimeout(() => {
+        if (!alive()) return;
+        // reveal Seed C in the middle column
+        const seedCBox = $("box-seed"+seedKey);
+        if (seedCBox) {
+          seedCBox.style.display = "";
+          seedCBox.classList.add("ms-appear");
+          setTimeout(() => seedCBox.classList.remove("ms-appear"), 900);
+        }
+        seeds[seedKey].enabled = true;
+
+        // mark the shoot as a ManagedSeed
+        s.managedSeed = seedKey;
+
+        // wire: API Server → gardenlet in new seed
+        const wId = "w-glet-"+seedKey;
+        if (!WIRE_DEFS.some(w => w.id===wId)) {
+          WIRE_DEFS.push({ id: wId, from:"actor-apiserver", to:"gardenlet-"+seedKey });
+        }
+        flashGardenlet(seedKey);
+        liveWire(wId, 1600);
+
+        log(`ManagedSeed: Seed ${seedKey} (azure/us-east-1) is now REGISTERED — create an azure/us-east-1 shoot and it will be scheduled here ✓`, "ok");
+        render();
+        if (selectedShootId === s.id) showShootPanel(s);
+      }, 1200);
+    }, 1400);
+  }, 1100);
 }
 
 // ---- Shoot lifecycle (controllers on timers) ----
